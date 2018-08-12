@@ -1,7 +1,6 @@
 package shadowsocks
 
 import (
-	// "io"
 	"net"
 	"time"
 )
@@ -13,13 +12,16 @@ func SetReadTimeout(c net.Conn) {
 }
 
 // PipeThenClose copies data from src to dst, closes dst when done.
-func PipeThenClose(src, dst net.Conn) {
+func PipeThenClose(src, dst net.Conn, addTraffic func(int)) {
 	defer dst.Close()
 	buf := leakyBuf.Get()
 	defer leakyBuf.Put(buf)
 	for {
 		SetReadTimeout(src)
 		n, err := src.Read(buf)
+		if addTraffic != nil {
+			addTraffic(n)
+		}
 		// read may return EOF with n > 0
 		// should always process n > 0 bytes before handling error
 		if n > 0 {
@@ -41,4 +43,5 @@ func PipeThenClose(src, dst net.Conn) {
 			break
 		}
 	}
+	return
 }

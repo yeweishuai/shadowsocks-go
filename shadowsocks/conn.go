@@ -8,6 +8,10 @@ import (
 	"strconv"
 )
 
+const (
+	AddrMask        byte = 0xf
+)
+
 type Conn struct {
 	net.Conn
 	*Cipher
@@ -74,6 +78,18 @@ func Dial(addr, server string, cipher *Cipher) (c *Conn, err error) {
 	return DialWithRawAddr(ra, server, cipher)
 }
 
+func (c *Conn) GetIv() (iv []byte) {
+	iv = make([]byte, len(c.iv))
+	copy(iv, c.iv)
+	return
+}
+
+func (c *Conn) GetKey() (key []byte) {
+	key = make([]byte, len(c.key))
+	copy(key, c.key)
+	return
+}
+
 func (c *Conn) Read(b []byte) (n int, err error) {
 	if c.dec == nil {
 		iv := make([]byte, c.info.ivLen)
@@ -82,6 +98,9 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 		}
 		if err = c.initDecrypt(iv); err != nil {
 			return
+		}
+		if len(c.iv) == 0 {
+			c.iv = iv
 		}
 	}
 

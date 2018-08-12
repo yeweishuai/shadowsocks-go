@@ -18,11 +18,12 @@ import (
 )
 
 type Config struct {
-	Server     interface{} `json:"server"`
-	ServerPort int         `json:"server_port"`
-	LocalPort  int         `json:"local_port"`
-	Password   string      `json:"password"`
-	Method     string      `json:"method"` // encryption method
+	Server       interface{} `json:"server"`
+	ServerPort   int         `json:"server_port"`
+	LocalPort    int         `json:"local_port"`
+	LocalAddress string      `json:"local_address"`
+	Password     string      `json:"password"`
+	Method       string      `json:"method"` // encryption method
 
 	// following options are only used by server
 	PortPassword map[string]string `json:"port_password"`
@@ -39,7 +40,7 @@ var readTimeout time.Duration
 
 func (config *Config) GetServerArray() []string {
 	// Specifying multiple servers in the "server" options is deprecated.
-	// But for backward compatiblity, keep this.
+	// But for backward compatibility, keep this.
 	if config.Server == nil {
 		return nil
 	}
@@ -123,9 +124,6 @@ func UpdateConfig(old, new *Config) {
 				oldField.SetInt(i)
 			}
 		}
-	}
-	if old.Method == "table" {
-		old.Method = ""
 	}
 
 	old.Timeout = new.Timeout

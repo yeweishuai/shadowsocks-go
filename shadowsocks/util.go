@@ -1,13 +1,15 @@
 package shadowsocks
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"os"
 )
 
 func PrintVersion() {
-	const version = "1.1.4"
+	const version = "1.2.2"
 	fmt.Println("shadowsocks-go version", version)
 }
 
@@ -23,4 +25,22 @@ func IsFileExists(path string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+func HmacSha1(key []byte, data []byte) []byte {
+	hmacSha1 := hmac.New(sha1.New, key)
+	hmacSha1.Write(data)
+	return hmacSha1.Sum(nil)[:10]
+}
+
+type ClosedFlag struct {
+	flag bool
+}
+
+func (flag *ClosedFlag) SetClosed() {
+	flag.flag = true
+}
+
+func (flag *ClosedFlag) IsClosed() bool {
+	return flag.flag
 }

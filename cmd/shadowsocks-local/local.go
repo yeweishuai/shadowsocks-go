@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	ss "github.com/shadowsocks/shadowsocks-go/shadowsocks"
 	"io"
 	"log"
 	"math/rand"
@@ -14,6 +13,8 @@ import (
 	"path"
 	"strconv"
 	"time"
+
+	ss "github.com/shadowsocks/shadowsocks-go/shadowsocks"
 )
 
 var debug ss.DebugLog
@@ -78,7 +79,7 @@ func getRequest(conn net.Conn) (rawaddr []byte, host string, err error) {
 		idVer   = 0
 		idCmd   = 1
 		idType  = 3 // address type index
-		idIP0   = 4 // ip addres start index
+		idIP0   = 4 // ip address start index
 		idDmLen = 4 // domain address length index
 		idDm0   = 5 // domain address start index
 
@@ -208,14 +209,17 @@ func parseServerConfig(config *ss.Config) {
 			if !hasPort(server) {
 				log.Fatalf("no port for server %s\n", server)
 			}
-			cipher, ok := cipherCache[passwd]
+			// Using "|" as delimiter is safe here, since no encryption
+			// method contains it in the name.
+			cacheKey := encmethod + "|" + passwd
+			cipher, ok := cipherCache[cacheKey]
 			if !ok {
 				var err error
 				cipher, err = ss.NewCipher(encmethod, passwd)
 				if err != nil {
 					log.Fatal("Failed generating ciphers:", err)
 				}
-				cipherCache[passwd] = cipher
+				cipherCache[cacheKey] = cipher
 			}
 			servers.srvCipher[i] = &ServerCipher{server, cipher}
 			i++
@@ -306,7 +310,7 @@ func handleConnection(conn net.Conn) {
 	remote, err := createServerConn(rawaddr, addr)
 	if err != nil {
 		if len(servers.srvCipher) > 1 {
-			log.Println("Failed connect to all avaiable shadowsocks server")
+			log.Println("Failed connect to all available shadowsocks server")
 		}
 		return
 	}
@@ -316,8 +320,8 @@ func handleConnection(conn net.Conn) {
 		}
 	}()
 
-	go ss.PipeThenClose(conn, remote)
-	ss.PipeThenClose(remote, conn)
+	go ss.PipeThenClose(conn, remote, nil)
+	ss.PipeThenClose(remote, conn, nil)
 	closed = true
 	debug.Println("closed connection to", addr)
 }
@@ -346,14 +350,14 @@ func enoughOptions(config *ss.Config) bool {
 func main() {
 	log.SetOutput(os.Stdout)
 
-	var configFile, cmdServer, cmdLocal string
+	var configFile, cmdServer string
 	var cmdConfig ss.Config
 	var printVer bool
 
 	flag.BoolVar(&printVer, "version", false, "print version")
 	flag.StringVar(&configFile, "c", "config.json", "specify config file")
 	flag.StringVar(&cmdServer, "s", "", "server address")
-	flag.StringVar(&cmdLocal, "b", "", "local address, listen only to this address if specified")
+	flag.StringVar(&cmdConfig.LocalAddress, "b", "", "local address, listen only to this address if specified")
 	flag.StringVar(&cmdConfig.Password, "k", "", "password")
 	flag.IntVar(&cmdConfig.ServerPort, "p", 0, "server port")
 	flag.IntVar(&cmdConfig.Timeout, "t", 300, "timeout in seconds")
@@ -410,6 +414,5 @@ func main() {
 	}
 
 	parseServerConfig(config)
-
-	run(cmdLocal + ":" + strconv.Itoa(config.LocalPort))
+	run(config.LocalAddress + ":" + strconv.Itoa(config.LocalPort))
 }
