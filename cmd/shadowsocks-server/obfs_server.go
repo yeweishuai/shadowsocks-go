@@ -352,7 +352,25 @@ func waitSignal() {
 	}
 }
 
-func obfsHandelConnection(csession *ss.ConnSession) {
+// original getRequest(...)
+func getHost(conn *ss.ObfsConn) (host string, err error) {
+    ss.SetReadTimeout(conn)
+    buf := ss.ObfsLeakyBuf.Get()
+    defer ss.ObfsLeakyBuf.Put(buf)
+    if n, err := conn.Read(buf); err != nil {
+        ss.Printn("read error:%s, n:%d", err.Error(), n)
+        return "", err
+    }
+    return
+}
+
+func obfsHandleConnection(oc *ss.ObfsConn) {
+    // get host
+    host, err := getHost(oc)
+    ss.Printn("host:%s, err:%p", host, err)
+    // dial
+    // pipe
+    return
 }
 
 func obfs_accept() (err error) {
@@ -369,7 +387,7 @@ func obfs_accept() (err error) {
             continue
         }
         // csession := ss.ConnSession{}
-        // go obfsHandelConnection(&csession)
+        // go obfsHandleConnection(ss.ObfsNewConn())
         for {
             buf := make([]byte, 10)
             // _, err = conn.Read(buf)
