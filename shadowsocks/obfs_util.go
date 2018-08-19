@@ -132,3 +132,14 @@ func ParseObfsHeader(header *string) (obfs *ObfsHeader, err error) {
 
     return
 }
+
+func GetSlice(source []byte, slen int, start, end int) (new_arr []byte, err error) {
+    if start > slen || end > slen {
+        err = fmt.Errorf("start[%d] or end[%d] index outofbound source length[%d]",
+                start, end, slen)
+        return nil, err
+    }
+    new_arr = source[start:end]
+    return
+}
+

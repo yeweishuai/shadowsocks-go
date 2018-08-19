@@ -101,9 +101,15 @@ func (oc *ObfsConn) InitDecrypt(iv []byte) (err error) {
     return
 }
 
-func (oc *ObfsConn) DecryptByte(dst, src []byte) {
+func (oc *ObfsConn) DecryptByte(dst, src []byte) (err error) {
+    if oc.Cipher == nil || oc.dec == nil {
+        err = fmt.Errorf("cipher[%p] or decryptor is nil!",
+                oc.Cipher)
+        return
+    }
     if len(dst) < len(src) {
         dst = make([]byte, len(src))
     }
     oc.decrypt(dst, src)
+    return
 }

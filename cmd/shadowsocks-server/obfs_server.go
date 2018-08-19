@@ -378,6 +378,7 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
             Pass: "foobar",
         }
         // return "", err
+        ss.Printn("get pass error, try mock in test env")
     }
     ss.Printn("parse obfs header, get pass:%s", obfs.Pass)
     ss.Printn("%s", str_arr[0])
@@ -410,15 +411,70 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     ss.Printn("encrypt content[%s], len[%d], split string[%s] len[%d]",
             encrypt_tostr, len(encrypt_tostr), str_arr[1], len(str_arr[1]))
 
-    if err = oc.InitDecrypt(encrypt_bytes[:oc.GetIvLen()]); err != nil {
+    enc_len := len(encrypt_bytes)
+    iv_bytes, err := ss.GetSlice(encrypt_bytes, enc_len, 0, oc.GetIvLen())
+    if err != nil {
+        err = fmt.Errorf("get iv bytes error:%s", err.Error())
+        return "", err
+    }
+    if err = oc.InitDecrypt(iv_bytes); err != nil {
+        return "", err
+    }
+    payload_bytes, err := ss.GetSlice(encrypt_bytes, enc_len, oc.GetIvLen(), enc_len)
+    payload_len := len(payload_bytes)
+
+    // decrypt
+    decrypt_bytes := make([]byte, payload_len)
+    if err = oc.DecryptByte(decrypt_bytes, payload_bytes); err != nil {
+        err = fmt.Errorf("decrypt payload error:%s", err.Error())
+        return "", err
+    }
+    ss.Printn("get decrypt bytes:%v", decrypt_bytes)
+
+    // get host
+    addrBuf, err := ss.GetSlice(payload_bytes, payload_len, idType, idType + 1)
+    if err != nil {
+        err = fmt.Errorf("get addrtype error:%s", err.Error())
         return "", err
     }
 
-    // decrypt
-    decrypt_bytes := make([]byte, len(encrypt_bytes))
-    oc.DecryptByte(decrypt_bytes, encrypt_bytes)
-    ss.Printn("get decrypt string:%s", string(decrypt_bytes))
+    var reqStart, reqEnd, dmLen int
+    addrType := addrBuf[idType]
+    switch addrType & ss.AddrMask {
+    case typeIPv4:
+        reqStart, reqEnd = idIP0, idIP0+lenIPv4
+    case typeIPv6:
+        reqStart, reqEnd = idIP0, idIP0+lenIPv6
+    case typeDm:
+        dmBuf, err := ss.GetSlice(payload_bytes, payload_len, idType + 1, idDmLen + 1)
+        if err != nil {
+            err = fmt.Errorf("try get domain request boundry error:%s", err.Error())
+            return "", err
+        }
+        dmLen = int(dmBuf[idDmLen])
+        reqStart, reqEnd = idDm0, idDm0 + dmLen + lenDmBase
+    default:
+        err = fmt.Errorf("addr type %d not supported", addrType&ss.AddrMask)
+        return
+    }
 
+    host_bytes, err := ss.GetSlice(payload_bytes, payload_len, reqStart, reqEnd)
+    hlen := len(host_bytes)
+    if err != nil {
+        err = fmt.Errorf("try parse address error:%s", err.Error())
+        return "", err
+    }
+    switch addrType & ss.AddrMask {
+    case typeIPv4:
+        host = net.IP(host_bytes[: net.IPv4len]).String()
+    case typeIPv6:
+        host = net.IP(host_bytes[: net.IPv6len]).String()
+    case typeDm:
+        host = string(host_bytes[: dmLen])
+    }
+    port := binary.BigEndian.Uint16(host_bytes[hlen-2:hlen])
+    host = net.JoinHostPort(host, strconv.Itoa(int(port)))
+    ss.Printn("parse and get host:%s", host)
     // oc.ObfsInfo.ObfsHeaderRecved = true
     return
 }
