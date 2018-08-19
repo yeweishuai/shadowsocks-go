@@ -353,23 +353,91 @@ func waitSignal() {
 }
 
 // original getRequest(...)
-func getHost(conn *ss.ObfsConn) (host string, err error) {
-    ss.SetReadTimeout(conn)
+func getHost(oc *ss.ObfsConn) (host string, err error) {
+    ss.SetReadTimeout(oc)
     buf := ss.ObfsLeakyBuf.Get()
     defer ss.ObfsLeakyBuf.Put(buf)
-    if n, err := conn.Read(buf); err != nil {
+    n := 0
+    if n, err = oc.Read(buf); err != nil {
         ss.Printn("read error:%s, n:%d", err.Error(), n)
         return "", err
     }
+    ss.Printn("get buf size:%d", n)
+    buf_str := string(buf[:n])
+    str_arr := strings.Split(buf_str, "\r\n\r\n")
+    arr_len := len(str_arr)
+    expect_len := 2
+    if arr_len < expect_len {
+        err = fmt.Errorf("obfs header split len[%d] while expect[%d]", arr_len, expect_len)
+        ss.Printn("%s", err.Error())
+        return "", err
+    }
+    obfs, err := ss.ParseObfsHeader(&(str_arr[0]))
+    if err != nil {
+        obfs = &ss.ObfsHeader{
+            Pass: "foobar",
+        }
+        // return "", err
+    }
+    ss.Printn("parse obfs header, get pass:%s", obfs.Pass)
+    ss.Printn("%s", str_arr[0])
+    for _, char := range str_arr[1] {
+        fmt.Printf("%x ", char)
+    }
+    ss.Printn("")
+
+    // get cipher
+    cipher, exists := G_pass_cipher_map[obfs.Pass]
+    if !exists || cipher == nil {
+        err = fmt.Errorf("password[%s] not exist in config, cipher[%p]",
+                obfs.Pass, cipher)
+        ss.Printn("%s", err.Error())
+        return "", err
+    }
+
+    oc.Cipher = cipher.Copy()
+    ss.Printn("cihper:%v %v", *(oc.Cipher), oc.GetKey())
+    obfs_header_len := len(str_arr[0])
+    ss.Printn("get obfs heder len[%d]", obfs_header_len)
+    encrypt_content_start_index := obfs_header_len + 4
+    encrypt_bytes := buf[encrypt_content_start_index:n]
+    rhead_len := len(obfs.RandHead)
+    if rhead_len > 0 {
+        ss.Printn("rand head len[%d], try append to encrypt bytes.", rhead_len)
+        encrypt_bytes = append(obfs.RandHead, encrypt_bytes...)
+    }
+    encrypt_tostr := string(encrypt_bytes)
+    ss.Printn("encrypt content[%s], len[%d], split string[%s] len[%d]",
+            encrypt_tostr, len(encrypt_tostr), str_arr[1], len(str_arr[1]))
+
+    if err = oc.InitDecrypt(encrypt_bytes[:oc.GetIvLen()]); err != nil {
+        return "", err
+    }
+
+    // decrypt
+    decrypt_bytes := make([]byte, len(encrypt_bytes))
+    oc.DecryptByte(decrypt_bytes, encrypt_bytes)
+    ss.Printn("get decrypt string:%s", string(decrypt_bytes))
+
+    // oc.ObfsInfo.ObfsHeaderRecved = true
     return
 }
 
 func obfsHandleConnection(oc *ss.ObfsConn) {
-    // get host
-    host, err := getHost(oc)
-    ss.Printn("host:%s, err:%p", host, err)
-    // dial
-    // pipe
+    // get host TODO close in pipe
+    defer oc.Close()
+    for { // TODO move for into pipe
+        host, err := getHost(oc)
+        if err != nil {
+            ss.Printn("get error:%s", err.Error())
+            oc.FakeResponse()
+            return
+        }
+        ss.Printn("host:%s, err:%p", host, err)
+        oc.Write([]byte("obfs conn ok\n"))
+        // dial
+        // pipe
+    }
     return
 }
 
@@ -386,8 +454,8 @@ func obfs_accept() (err error) {
             // TODO: return ?
             continue
         }
-        // csession := ss.ConnSession{}
-        // go obfsHandleConnection(ss.ObfsNewConn())
+        go obfsHandleConnection(ss.ObfsNewConn(conn))
+        /*
         for {
             buf := make([]byte, 10)
             // _, err = conn.Read(buf)
@@ -399,7 +467,8 @@ func obfs_accept() (err error) {
             fmt.Print(string(buf))
             conn.Write([]byte("ok"))
         }
-        conn.Close()
+        */
+        // conn.Close()
     }
     return
 }

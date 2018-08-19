@@ -1,8 +1,9 @@
 package shadowsocks
 
 import (
-	"io"
-	"net"
+//    "io"
+    "fmt"
+    "net"
 )
 
 // session info for each connection
@@ -12,13 +13,27 @@ type ObfsSessionInfo struct {
 }
 
 type ObfsConn struct {
-                        *Conn
+                        net.Conn
+                        *Cipher
+        readBuf         []byte
+        writeBuf        []byte
         ObfsInfo        *ObfsSessionInfo
+}
+
+func (oc *ObfsConn) Close() (err error) {
+    ObfsLeakyBuf.Put(oc.readBuf)
+    ObfsLeakyBuf.Put(oc.writeBuf)
+    oc.Conn.Close()
+    Printn("close obfs connection")
+    return
 }
 
 func ObfsNewConn(c net.Conn) *ObfsConn {
     return &ObfsConn {
-            Conn :  NewConn(c, nil),
+            Conn :  c,
+            Cipher: nil,
+            readBuf: ObfsLeakyBuf.Get(),
+            writeBuf: ObfsLeakyBuf.Get(),
             ObfsInfo : &ObfsSessionInfo {
                     ObfsHeaderSent:false,
                     ObfsHeaderRecved:false,
@@ -26,69 +41,69 @@ func ObfsNewConn(c net.Conn) *ObfsConn {
     }
 }
 
-func (c *ObfsConn) Deobfs(b []byte) (n int, err error) {
+func (oc *ObfsConn) GetIv() (iv []byte) {
+    iv = make([]byte, len(oc.iv))
+    copy(iv, oc.iv)
     return
 }
 
-// first time, read size varies as obfs
-// So actual return size may exceed expect slice array size
-func (c *ObfsConn) Read(b []byte) (n int, err error) {
-        if c.Cipher == nil {
-            return c.Deobfs(b)
-        }
-
-
-	if c.dec == nil {
-		iv := make([]byte, c.info.ivLen)
-		if _, err = io.ReadFull(c.Conn, iv); err != nil {
-			return
-		}
-		if err = c.initDecrypt(iv); err != nil {
-			return
-		}
-		if len(c.iv) == 0 {
-			c.iv = iv
-		}
-	}
-
-	cipherData := c.readBuf
-	if len(b) > len(cipherData) {
-		cipherData = make([]byte, len(b))
-	} else {
-		cipherData = cipherData[:len(b)]
-	}
-
-	n, err = c.Conn.Read(cipherData)
-	if n > 0 {
-		c.decrypt(b[0:n], cipherData[0:n])
-	}
-	return
+func (oc *ObfsConn) GetIvLen() (ivlen int) {
+    ivlen = oc.info.ivLen
+    return ivlen
 }
 
-func (c *ObfsConn) Write(b []byte) (n int, err error) {
-	var iv []byte
-	if c.enc == nil {
-		iv, err = c.initEncrypt()
-		if err != nil {
-			return
-		}
-	}
+func (oc *ObfsConn) GetKey() (key []byte) {
+    key = make([]byte, len(oc.key))
+    copy(key, oc.key)
+    return
+}
 
-	cipherData := c.writeBuf
-	dataSize := len(b) + len(iv)
-	if dataSize > len(cipherData) {
-		cipherData = make([]byte, dataSize)
-	} else {
-		cipherData = cipherData[:dataSize]
-	}
+// Upon connection accepting, read content exists obfs headers.
+func (oc *ObfsConn) Read(b []byte) (n int, err error) {
+    // first read obfs content upon connection
+    if !oc.ObfsInfo.ObfsHeaderRecved {
+        n, err = oc.Conn.Read(b)
+        return n, err
+    }
+    if oc.Cipher == nil {
+    }
+    return
+}
 
-	if iv != nil {
-		// Put initialization vector in buffer, do a single write to send both
-		// iv and data.
-		copy(cipherData, iv)
-	}
+func (oc *ObfsConn) Write(b []byte) (n int, err error) {
+    n, err = oc.Conn.Write(b)
+    return n, err
+}
 
-	c.encrypt(cipherData[len(iv):], b)
-	n, err = c.Conn.Write(cipherData)
-	return
+func (oc *ObfsConn) FakeResponse() {
+    oc.Conn.Write(FakeHttpResponse)
+}
+
+func (oc *ObfsConn) InitDecrypt(iv []byte) (err error) {
+    if oc.dec != nil {
+        Printn("decrypt already init!")
+        return nil
+    }
+    if oc.Cipher == nil {
+        err = fmt.Errorf("cipher[%p] nullptr!", oc.Cipher)
+        return
+    }
+    ivlen := len(iv)
+    if ivlen != oc.info.ivLen {
+        err = fmt.Errorf("param ivlen[%d] while expect[%d]",
+                ivlen, oc.info.ivLen)
+        return err
+    }
+    if err = oc.initDecrypt(iv); err != nil {
+        return err
+    }
+
+    return
+}
+
+func (oc *ObfsConn) DecryptByte(dst, src []byte) {
+    if len(dst) < len(src) {
+        dst = make([]byte, len(src))
+    }
+    oc.decrypt(dst, src)
 }
