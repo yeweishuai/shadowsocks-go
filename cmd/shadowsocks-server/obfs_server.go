@@ -432,7 +432,7 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     ss.Printn("get decrypt bytes:%v", decrypt_bytes)
 
     // get host
-    addrBuf, err := ss.GetSlice(payload_bytes, payload_len, idType, idType + 1)
+    addrBuf, err := ss.GetSlice(decrypt_bytes, payload_len, idType, idType + 1)
     if err != nil {
         err = fmt.Errorf("get addrtype error:%s", err.Error())
         return "", err
@@ -446,7 +446,7 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     case typeIPv6:
         reqStart, reqEnd = idIP0, idIP0+lenIPv6
     case typeDm:
-        dmBuf, err := ss.GetSlice(payload_bytes, payload_len, idType + 1, idDmLen + 1)
+        dmBuf, err := ss.GetSlice(decrypt_bytes, payload_len, idType + 1, idDmLen + 1)
         if err != nil {
             err = fmt.Errorf("try get domain request boundry error:%s", err.Error())
             return "", err
@@ -458,7 +458,7 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
         return
     }
 
-    host_bytes, err := ss.GetSlice(payload_bytes, payload_len, reqStart, reqEnd)
+    host_bytes, err := ss.GetSlice(decrypt_bytes, payload_len, reqStart, reqEnd)
     hlen := len(host_bytes)
     if err != nil {
         err = fmt.Errorf("try parse address error:%s", err.Error())
