@@ -353,14 +353,14 @@ func waitSignal() {
 }
 
 // original getRequest(...)
-func getHost(oc *ss.ObfsConn) (host string, err error) {
+func getHost(oc *ss.ObfsConn) (host string, obfs_req_buf []byte, err error) {
     ss.SetReadTimeout(oc)
     buf := ss.ObfsLeakyBuf.Get()
     defer ss.ObfsLeakyBuf.Put(buf)
     n := 0
     if n, err = oc.Read(buf); err != nil {
         ss.Printn("read error:%s, n:%d", err.Error(), n)
-        return "", err
+        return "", nil, err
     }
     ss.Printn("get buf size:%d", n)
     buf_str := string(buf[:n])
@@ -370,14 +370,14 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     if arr_len < expect_len {
         err = fmt.Errorf("obfs header split len[%d] while expect[%d]", arr_len, expect_len)
         ss.Printn("%s", err.Error())
-        return "", err
+        return "", nil, err
     }
     obfs, err := ss.ParseObfsHeader(&(str_arr[0]))
     if err != nil {
         obfs = &ss.ObfsHeader{
             Pass: "foobar",
         }
-        // return "", err
+        // return "", nil, err
         ss.Printn("get pass error, try mock in test env")
     }
     ss.Printn("parse obfs header, get pass:%s", obfs.Pass)
@@ -393,7 +393,7 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
         err = fmt.Errorf("password[%s] not exist in config, cipher[%p]",
                 obfs.Pass, cipher)
         ss.Printn("%s", err.Error())
-        return "", err
+        return "", nil, err
     }
 
     oc.Cipher = cipher.Copy()
@@ -415,10 +415,10 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     iv_bytes, err := ss.GetSlice(encrypt_bytes, enc_len, 0, oc.GetIvLen())
     if err != nil {
         err = fmt.Errorf("get iv bytes error:%s", err.Error())
-        return "", err
+        return "", nil, err
     }
     if err = oc.InitDecrypt(iv_bytes); err != nil {
-        return "", err
+        return "", nil, err
     }
     payload_bytes, err := ss.GetSlice(encrypt_bytes, enc_len, oc.GetIvLen(), enc_len)
     payload_len := len(payload_bytes)
@@ -427,7 +427,7 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     decrypt_bytes := make([]byte, payload_len)
     if err = oc.DecryptByte(decrypt_bytes, payload_bytes); err != nil {
         err = fmt.Errorf("decrypt payload error:%s", err.Error())
-        return "", err
+        return "", nil, err
     }
     ss.Printn("get decrypt bytes:%v", decrypt_bytes)
 
@@ -435,7 +435,7 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     addrBuf, err := ss.GetSlice(decrypt_bytes, payload_len, idType, idType + 1)
     if err != nil {
         err = fmt.Errorf("get addrtype error:%s", err.Error())
-        return "", err
+        return "", nil, err
     }
 
     var reqStart, reqEnd, dmLen int
@@ -449,9 +449,9 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
         dmBuf, err := ss.GetSlice(decrypt_bytes, payload_len, idType + 1, idDmLen + 1)
         if err != nil {
             err = fmt.Errorf("try get domain request boundry error:%s", err.Error())
-            return "", err
+            return "", nil, err
         }
-        dmLen = int(dmBuf[idDmLen])
+        dmLen = int(dmBuf[0])
         reqStart, reqEnd = idDm0, idDm0 + dmLen + lenDmBase
     default:
         err = fmt.Errorf("addr type %d not supported", addrType&ss.AddrMask)
@@ -462,7 +462,7 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     hlen := len(host_bytes)
     if err != nil {
         err = fmt.Errorf("try parse address error:%s", err.Error())
-        return "", err
+        return "", nil, err
     }
     switch addrType & ss.AddrMask {
     case typeIPv4:
@@ -476,23 +476,63 @@ func getHost(oc *ss.ObfsConn) (host string, err error) {
     host = net.JoinHostPort(host, strconv.Itoa(int(port)))
     ss.Printn("parse and get host:%s", host)
     // oc.ObfsInfo.ObfsHeaderRecved = true
+    obfs_req_buf, err = ss.GetSlice(decrypt_bytes, payload_len, reqEnd, payload_len)
     return
 }
 
 func obfsHandleConnection(oc *ss.ObfsConn) {
     // get host TODO close in pipe
-    defer oc.Close()
+    // defer oc.Close()
     for { // TODO move for into pipe
-        host, err := getHost(oc)
+        host, obfs_req_buf, err := getHost(oc)
         if err != nil {
             ss.Printn("get error:%s", err.Error())
             oc.FakeResponse()
             return
         }
+        // ensure the host does not contain some illegal characters, 
+        // NUL may panic on Win32
+        if strings.ContainsRune(host, 0x00) {
+            ss.Printn("invalid domain name:%s", host)
+            return
+        }
         ss.Printn("host:%s, err:%p", host, err)
-        oc.Write([]byte("obfs conn ok\n"))
+
         // dial
+        ss.Printn("try connecting to %s", host)
+        remote, err := net.Dial("tcp", host)
+        if err != nil {
+            if ne, ok := err.(*net.OpError); ok &&
+                    (ne.Err == syscall.EMFILE || ne.Err == syscall.ENFILE) {
+                // log too many open file error
+                // EMFILE is process reaches open file limits, ENFILE is system limit
+                ss.Printn("dial host %s error:%s", host, err.Error())
+            } else {
+                ss.Printn("connecting to %s error:%s", host, err.Error())
+            }
+            return
+        }
+        if len(obfs_req_buf) > 0 {
+            remote.Write(obfs_req_buf)
+        }
+        defer func() {
+            // remote.Close()
+        }()
+
         // pipe
+        if debug {
+            debug.Printf("piping %s<->%s", sanitizeAddr(oc.RemoteAddr()), host)
+        }
+        go func() {
+            ss.PipeThenClose(oc, remote, func(traffic int) {
+                // TODO
+            })
+        }()
+
+        ss.PipeThenClose(remote, oc, func(traffic int) {
+            // TODO
+        })
+
     }
     return
 }

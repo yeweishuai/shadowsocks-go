@@ -19,6 +19,7 @@ func PipeThenClose(src, dst net.Conn, addTraffic func(int)) {
 	for {
 		SetReadTimeout(src)
 		n, err := src.Read(buf)
+        Printn("source read %d bytes.", n)
 		if addTraffic != nil {
 			addTraffic(n)
 		}
@@ -26,7 +27,9 @@ func PipeThenClose(src, dst net.Conn, addTraffic func(int)) {
 		// should always process n > 0 bytes before handling error
 		if n > 0 {
 			// Note: avoid overwrite err returned by Read.
-			if _, err := dst.Write(buf[0:n]); err != nil {
+			wn, err := dst.Write(buf[0:n])
+            Printn("write %d/%d bytes", wn, n)
+            if err != nil {
 				Debug.Println("write:", err)
 				break
 			}

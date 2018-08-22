@@ -22,11 +22,21 @@ const (
             "Content-Length: 0\r\n" +
             "\r\n" +
             "<html><body>Redirecting...</body></html>"
+
+    ObfsHttpResponse = "HTTP/1.1 200 OK\r\n" +
+            "Connection: keep-alive\r\n" +
+            "Content-Encoding: gzip\r\n" +
+            "Content-Type: text/html\r\n" +
+            "Server: nginx\r\n" +
+            "Vary: Accept-Encoding\r\n" +
+            "\r\n"
 )
 
 var (
     ObfsLeakyBuf        = NewLeakyBuf(MaxNBuf, LBufSize)
     FakeHttpResponse    = []byte(OnFailHttpResponse)
+    ObfsResponseHeader  = []byte(ObfsHttpResponse)
+    ObfsResHeaderLen    = len(ObfsResponseHeader)
 )
 
 func Printn(format string, content... interface{}) (n int, err error) {
