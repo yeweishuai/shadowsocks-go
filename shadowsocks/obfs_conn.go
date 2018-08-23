@@ -24,7 +24,6 @@ func (oc *ObfsConn) Close() (err error) {
     ObfsLeakyBuf.Put(oc.readBuf)
     ObfsLeakyBuf.Put(oc.writeBuf)
     oc.Conn.Close()
-    Printn("close obfs connection")
     return
 }
 
@@ -91,7 +90,6 @@ func (oc *ObfsConn) Write(b []byte) (n int, err error) {
         return
     }
     if oc.enc == nil {
-        Printn("try init encryptor")
         iv, err = oc.initEncrypt()
         if err != nil {
             err = fmt.Errorf("try write->init encrypt error:%s", err.Error())
@@ -101,8 +99,6 @@ func (oc *ObfsConn) Write(b []byte) (n int, err error) {
 
     cipherData := oc.writeBuf
     dataSize := len(b) + len(iv)
-    Printn("try write to client, iv len %d, data size %d",
-            len(iv), dataSize)
 
     if dataSize > len(cipherData) {
         cipherData = make([]byte, dataSize)
@@ -123,7 +119,6 @@ func (oc *ObfsConn) Write(b []byte) (n int, err error) {
         copy(obfsData[ObfsResHeaderLen:], cipherData[:dataSize])
         cipherData = obfsData
         oc.ObfsInfo.ObfsHeaderSent = true
-        Printn("obfs response header:\n%s", cipherData[:ObfsResHeaderLen])
     }
     n, err = oc.Conn.Write(cipherData)
     return n, err

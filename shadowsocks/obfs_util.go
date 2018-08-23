@@ -82,12 +82,10 @@ func ParseObfsHeader(header *string) (obfs *ObfsHeader, err error) {
             byte_str += chars
         }
     }
-    Printn("rand head byte string:%s, len:%d", byte_str, len(byte_str))
 
     pass := ""
     for _, obfs_line := range str_arr {
         obfs_line = strings.TrimSpace(obfs_line)
-        Printn("traverse obfs line:%s", obfs_line)
         // find line like "Cookie: cid=892idj"
         if !strings.HasPrefix(obfs_line, ObfsHiddenIn) {
             continue
@@ -115,7 +113,6 @@ func ParseObfsHeader(header *string) (obfs *ObfsHeader, err error) {
             }
             key := strings.TrimSpace(split_arr[0])
             val := strings.TrimSpace(split_arr[1])
-            Printn("split get key[%s] val[%s]", key, val)
             if key == ObfsPassKey {
                 pass = val
             }
@@ -126,7 +123,6 @@ func ParseObfsHeader(header *string) (obfs *ObfsHeader, err error) {
         Printn("%s", err.Error())
         return nil, err
     }
-    Printn("get pass:%s", pass)
 
     rand_head, err := hex.DecodeString(byte_str)
     if err != nil {
@@ -138,7 +134,6 @@ func ParseObfsHeader(header *string) (obfs *ObfsHeader, err error) {
         Pass: pass,
         RandHead: rand_head,
     }
-    Printn("get rand head len:%d", len(obfs.RandHead))
 
     return
 }

@@ -362,7 +362,6 @@ func getHost(oc *ss.ObfsConn) (host string, obfs_req_buf []byte, err error) {
         ss.Printn("read error:%s, n:%d", err.Error(), n)
         return "", nil, err
     }
-    ss.Printn("get buf size:%d", n)
     buf_str := string(buf[:n])
     str_arr := strings.Split(buf_str, "\r\n\r\n")
     arr_len := len(str_arr)
@@ -380,12 +379,6 @@ func getHost(oc *ss.ObfsConn) (host string, obfs_req_buf []byte, err error) {
         // return "", nil, err
         ss.Printn("get pass error, try mock in test env")
     }
-    ss.Printn("parse obfs header, get pass:%s", obfs.Pass)
-    ss.Printn("%s", str_arr[0])
-    for _, char := range str_arr[1] {
-        fmt.Printf("%x ", char)
-    }
-    ss.Printn("")
 
     // get cipher
     cipher, exists := G_pass_cipher_map[obfs.Pass]
@@ -397,19 +390,14 @@ func getHost(oc *ss.ObfsConn) (host string, obfs_req_buf []byte, err error) {
     }
 
     oc.Cipher = cipher.Copy()
-    ss.Printn("cihper:%v %v", *(oc.Cipher), oc.GetKey())
     obfs_header_len := len(str_arr[0])
-    ss.Printn("get obfs heder len[%d]", obfs_header_len)
     encrypt_content_start_index := obfs_header_len + 4
     encrypt_bytes := buf[encrypt_content_start_index:n]
     rhead_len := len(obfs.RandHead)
     if rhead_len > 0 {
-        ss.Printn("rand head len[%d], try append to encrypt bytes.", rhead_len)
+        // ss.Printn("rand head len[%d], try append to encrypt bytes.", rhead_len)
         encrypt_bytes = append(obfs.RandHead, encrypt_bytes...)
     }
-    encrypt_tostr := string(encrypt_bytes)
-    ss.Printn("encrypt content[%s], len[%d], split string[%s] len[%d]",
-            encrypt_tostr, len(encrypt_tostr), str_arr[1], len(str_arr[1]))
 
     enc_len := len(encrypt_bytes)
     iv_bytes, err := ss.GetSlice(encrypt_bytes, enc_len, 0, oc.GetIvLen())
@@ -429,7 +417,6 @@ func getHost(oc *ss.ObfsConn) (host string, obfs_req_buf []byte, err error) {
         err = fmt.Errorf("decrypt payload error:%s", err.Error())
         return "", nil, err
     }
-    ss.Printn("get decrypt bytes:%v", decrypt_bytes)
 
     // get host
     addrBuf, err := ss.GetSlice(decrypt_bytes, payload_len, idType, idType + 1)
@@ -474,8 +461,6 @@ func getHost(oc *ss.ObfsConn) (host string, obfs_req_buf []byte, err error) {
     }
     port := binary.BigEndian.Uint16(host_bytes[hlen-2:hlen])
     host = net.JoinHostPort(host, strconv.Itoa(int(port)))
-    ss.Printn("parse and get host:%s", host)
-    // oc.ObfsInfo.ObfsHeaderRecved = true
     obfs_req_buf, err = ss.GetSlice(decrypt_bytes, payload_len, reqEnd, payload_len)
     return
 }
@@ -483,57 +468,53 @@ func getHost(oc *ss.ObfsConn) (host string, obfs_req_buf []byte, err error) {
 func obfsHandleConnection(oc *ss.ObfsConn) {
     // get host TODO close in pipe
     // defer oc.Close()
-    for { // TODO move for into pipe
-        host, obfs_req_buf, err := getHost(oc)
-        if err != nil {
-            ss.Printn("get error:%s", err.Error())
-            oc.FakeResponse()
-            return
-        }
-        // ensure the host does not contain some illegal characters, 
-        // NUL may panic on Win32
-        if strings.ContainsRune(host, 0x00) {
-            ss.Printn("invalid domain name:%s", host)
-            return
-        }
-        ss.Printn("host:%s, err:%p", host, err)
+    host, obfs_req_buf, err := getHost(oc)
+    if err != nil {
+        ss.Printn("get error:%s", err.Error())
+        oc.FakeResponse()
+        return
+    }
+    // ensure the host does not contain some illegal characters, 
+    // NUL may panic on Win32
+    if strings.ContainsRune(host, 0x00) {
+        ss.Printn("invalid domain name:%s", host)
+        return
+    }
 
-        // dial
-        ss.Printn("try connecting to %s", host)
-        remote, err := net.Dial("tcp", host)
-        if err != nil {
-            if ne, ok := err.(*net.OpError); ok &&
-                    (ne.Err == syscall.EMFILE || ne.Err == syscall.ENFILE) {
-                // log too many open file error
-                // EMFILE is process reaches open file limits, ENFILE is system limit
-                ss.Printn("dial host %s error:%s", host, err.Error())
-            } else {
-                ss.Printn("connecting to %s error:%s", host, err.Error())
-            }
-            return
+    // dial
+    remote, err := net.Dial("tcp", host)
+    if err != nil {
+        if ne, ok := err.(*net.OpError); ok &&
+                (ne.Err == syscall.EMFILE || ne.Err == syscall.ENFILE) {
+            // log too many open file error
+            // EMFILE is process reaches open file limits, ENFILE is system limit
+            ss.Printn("dial host %s error:%s", host, err.Error())
+        } else {
+            ss.Printn("connecting to %s error:%s", host, err.Error())
         }
-        if len(obfs_req_buf) > 0 {
-            remote.Write(obfs_req_buf)
-        }
-        defer func() {
-            // remote.Close()
-        }()
+        return
+    }
+    if len(obfs_req_buf) > 0 {
+        remote.Write(obfs_req_buf)
+    }
+    defer func() {
+        // remote.Close()
+    }()
 
-        // pipe
-        if debug {
-            debug.Printf("piping %s<->%s", sanitizeAddr(oc.RemoteAddr()), host)
-        }
-        go func() {
-            ss.PipeThenClose(oc, remote, func(traffic int) {
-                // TODO
-            })
-        }()
-
-        ss.PipeThenClose(remote, oc, func(traffic int) {
+    // pipe
+    if debug {
+        debug.Printf("piping %s<->%s", sanitizeAddr(oc.RemoteAddr()), host)
+    }
+    go func() {
+        ss.PipeThenClose(oc, remote, func(traffic int) {
             // TODO
         })
+    }()
 
-    }
+    ss.PipeThenClose(remote, oc, func(traffic int) {
+        // TODO
+    })
+
     return
 }
 
