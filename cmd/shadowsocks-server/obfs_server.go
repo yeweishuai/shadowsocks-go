@@ -470,7 +470,7 @@ func obfsHandleConnection(oc *ss.ObfsConn) {
     // defer oc.Close()
     host, obfs_req_buf, err := getHost(oc)
     if err != nil {
-        ss.Printn("get error:%s", err.Error())
+        debug.Printf("get error:%s\n", err.Error())
         oc.FakeResponse()
         return
     }
